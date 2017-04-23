@@ -1,5 +1,4 @@
-local co = require 'src/Co'
-local json = require 'lib/json'
+local co = require 'dist/Co_min'
 require 'lib/TableLib'
 require 'lib/console'
 require 'lib/TryCall'
