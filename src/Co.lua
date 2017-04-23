@@ -1,3 +1,26 @@
+-----------------------------------------------------------------------------
+-- ES6 co lib in lua 5.1
+-- Author: fgfg163@163.com
+-- Copyright (c) 2015.11
+--
+-- This is a lib porting from Co v4 in JavaScript
+-- It has some different before.
+-- to see https://github.com/tj/co
+-- Useage:
+-- co(coroutine.create(function()
+--     local v1 = coroutine.yield(Promise.resolve(123))
+--     local v2 = coroutine.yield({
+--     a = Promise.resolve(234),
+--     b = Promise.resolve(456),
+--   })
+--   console.log(v1)
+--   console.log(v2)
+-- end)):catch(function(err)
+--   print(err)
+-- end)
+
+-----------------------------------------------------------------------------
+
 package.path = package.path .. ';..\\?.lua'
 require 'lib/TableLib'
 require 'lib/TryCall'
