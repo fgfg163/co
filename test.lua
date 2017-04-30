@@ -1,17 +1,17 @@
-local co = require 'Co'
-require 'TableLib'
 require 'console'
-require 'TryCall'
-
+local co = require 'Co'
+local Promise = require 'Promise'
 
 co(coroutine.create(function()
-  local v1 = coroutine.yield(Promise.resolve(123))
+  console.log('begin')
+  local v1 = coroutine.yield(Promise.resolve('some value'))
   console.log(v1)
   local v2 = coroutine.yield(Promise.all({
-    Promise.resolve(234),
-    Promise.resolve(254),
+    Promise.resolve('promise01'),
+    Promise.resolve('promise02'),
+    Promise.resolve('promise03'),
   }))
   console.log(v2)
-end)):catch(function(err)
-  print(err)
+end)).catch(function(err)
+  console.log(err)
 end)

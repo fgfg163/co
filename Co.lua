@@ -21,80 +21,84 @@
 
 -----------------------------------------------------------------------------
 
-require 'TableLib'
-require 'TryCall'
 
-
-Promise = Promise or require 'Promise'
+local Promise = Promise or require 'Promise'
 
 local unpack = unpack or table.unpack
+local isArray = table.isArray or function(tab)
+  if (type(tab) ~= "table") then
+    return false
+  end
+  local length = #tab
+  for k, v in pairs(tab) do
+    if ((type(k) ~= "number") or (k > length)) then
+      return false
+    end
+  end
+  return true
+end
+function tryCatch(cb)
+  return xpcall(cb, function(e)
+    return setStackTraceback and
+        (e .. '\n' .. debug.traceback())
+        or (e)
+  end)
+end
 
-
+----------------------------------------------------------------------
 function new(gen, ...)
   local args = { ... }
 
   return Promise.new(function(resolve, reject)
-    if (type(gen) == 'function') then
-      gen = gen(args)
-    end
-    if (not isCoroutine(gen)) then
-      return resolve(gen)
-    end
+    if (type(gen) == 'function') then gen = gen() end
+    if (type(gen) ~= 'thread') then return resolve(gen) end
 
-
-
-    -- @param {Mixed} res
-    -- @return {Promise}
-    -- @api private
-    function onFulfilled(res)
-      local done, flag, ret
-
-      local _, errMsg = tryCall(function()
-        flag, ret = coroutine.resume(gen, res)
+    function onResolved(res)
+      local done, ret, coStatus
+      local xpcallRes, xpcallErr = tryCatch(function()
+        coStatus, ret = coroutine.resume(gen, res)
       end)
-      if (errMsg) then
-        return reject(errMsg)
+      if (not xpcallRes) then
+        return reject(xpcallErr)
       end
-      done = coroutine.status(gen) == 'dead' and true or false
+      if (not coStatus) then
+        return reject(ret)
+      end
+      done = coroutine.status(gen) == 'dead'
       next(done, ret)
-      return nil
     end
 
-
-    -- @param {Error} err
-    -- @return {Promise}
-    -- @api private
     function onRejected(err)
-      local ret
-
-      local _, errMsg = tryCall(function()
-        ret = gen.throw(err)
+      console.log(err)
+      local done, ret, coStatus
+      local xpcallRes, xpcallErr = tryCatch(function()
+        coStatus, ret = coroutine.resume(gen, error(err))
+        console.log(ret)
       end)
-      if (errMsg) then
-        return reject(errMsg)
+      if (not xpcallRes) then
+        return reject(xpcallErr)
       end
-
-      next(ret);
+      if (not coStatus) then
+        return reject(xpcallErr)
+      end
+      done = coroutine.status(gen) == 'dead'
+      next(done, ret)
     end
 
-    -- Get the next value in the generator,
-    -- return a promise.
-    --
-    -- @param {Object} ret
-    -- @return {Promise}
-    -- @api private
     function next(done, ret)
       if (done) then return resolve(ret) end
-      local value = toPromise(ret);
-      if (value and isPromise(value)) then return value:andThen(onFulfilled, onRejected) end
-
-      return onRejected(error('You may only yield a function, promise, generator, array, or object, '
-          .. 'but the following object was passed: "' .. ret .. '"'))
+      local value = toPromise(ret)
+      if (value and (isPromise(value))) then return value.andThen(onResolved, onRejected) end
+      return onResolved(value)
+      --      return onRejected(error('You may only yield a function, promise, generator, array, or object, '
+      --          .. 'but the following object was passed: "' .. type(ret) .. '"'))
     end
 
-    onFulfilled();
+
+    onResolved();
   end)
 end
+
 
 -- Convert a `yield`ed value into a promise.
 --
@@ -108,7 +112,7 @@ function toPromise(obj)
   if (isCoroutine(obj)) then return new(obj) end
   if (type(obj) == 'function') then return thunkToPromise(obj) end
 
-  if (table.isArray(obj)) then
+  if (isArray(obj)) then
     return arrayToPromise(obj)
   elseif (type(obj) == 'table') then
     return objectToPromise(obj)
@@ -152,7 +156,7 @@ function thunkToPromise(fn)
     fn(function(err, res)
       if (err) then return reject(err) end
       if (#res > 2) then
-        res = table.slice(res, 0, 1)
+        res = { res[2] }
       end
       resolve(res)
     end)
@@ -166,7 +170,11 @@ end
 -- @return {Promise}
 -- @api private
 function arrayToPromise(obj)
-  return Promise.all(table.map(obj, toPromise));
+  local newArr = {}
+  for k, v in ipairs(obj) do
+    table.insert(newArr, toPromise(v))
+  end
+  return Promise.all(newArr);
 end
 
 -- Convert an object of "yieldables" to a promise.
@@ -181,14 +189,12 @@ function objectToPromise(obj)
 
   local function defer(promise, key)
     results[key] = nil
-    table.push(promises, promise:andThen(function(res)
+    table.insert(promises, promise.andThen(function(res)
       results[key] = res
     end))
   end
 
-  for _, it in ipairs(table.entries(obj)) do
-    local key = it[1]
-    local value = it[2]
+  for key, value in pairs(obj) do
     local promise = toPromise(value)
     if (promise and isPromise(promise)) then
       defer(promise, key)
@@ -197,10 +203,12 @@ function objectToPromise(obj)
     end
   end
 
-  return Promise.all(promises):andThen(function()
+  return Promise.all(promises).andThen(function()
     return results
   end)
 end
+
+
 
 return setmetatable({
   new = new;

@@ -1,245 +1,231 @@
------------------------------------------------------------------------------
--- ES6 Promise in lua v1.1
--- Author: aimingoo@wandoujia.com
--- Copyright (c) 2015.11
---
--- The promise module from NGX_4C architecture
--- 1) N4C is programming framework.
--- 2) N4C = a Controllable & Computable Communication Cluster architectur.
---
--- Promise module, ES6 Promises full supported. @see:
--- 1) https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise
--- 2) http://liubin.github.io/promises-book/#ch2-promise-resolve
---
--- Usage:
--- promise = Promise.new(executor)
--- promise:andThen(onFulfilled1):andThen(onFulfilled2, onRejected2)
---
--- History:
--- 2015.10.29	release v1.1, fix some bugs and update testcases
--- 2015.08.10	release v1.0.1, full testcases, minor fix and publish on github
--- 2015.03		release v1.0.0
------------------------------------------------------------------------------
+local PENDING = 0
+local RESOLVED = 1
+local REJECTED = 2
 
-local Promise, promise = {}, {}
-
--- andThen replacer
---  1) replace standard .then() when promised
-local PENDING = {}
-local nil_promise = {}
-
-local function promised(value, action)
-  local ok, result = pcall(action, value)
-  return ok and Promise.resolve(result) or Promise.reject(result) -- .. '.\n' .. debug.traceback())
+-- 是否需要显示stack traceback里的错误信息
+-- stack traceback错误信息很长，所以这个功能作为可选项
+local stackTraceback = true
+-- 封装了xpcall方法
+function tryCatch(cb)
+  return xpcall(cb, function(e)
+    return stackTraceback and
+        (e .. '\n' .. debug.traceback())
+        or (e)
+  end)
 end
 
-local function promised_s(self, onFulfilled)
-  return onFulfilled and promised(self, onFulfilled) or self
-end
-
-local function promised_y(self, onFulfilled)
-  return onFulfilled and promised(self[1], onFulfilled) or self
-end
-
-local function promised_n(self, _, onRejected)
-  return onRejected and promised(self[1], onRejected) or self
-end
-
--- inext() list all elementys in array
---	*) next() will list all members for table without order
---	*) @see iter(): http://www.lua.org/pil/7.3.html
-local function inext(a, i)
-  i = i + 1
-  local v = a[i]
-  if v then return i, v end
-end
-
--- put resolved value to p[1], or push lazyed calls/object to p[]
---	1) if resolved a no pending promise, direct call promise.andThen()
-local function nothing(x) return x end
-
-local function resolver(this, resolved, sure)
-  local typ = type(resolved)
-  if (typ == 'table' and resolved.andThen) then
-    local lazy = {
-      this,
-      function(value) return resolver(this, value, true) end,
-      function(reason) return resolver(this, reason, false) end
-    }
-    if resolved[1] == PENDING then
-      table.insert(resolved, lazy) -- lazy again
-    else -- deep resolve for promise instance, until non-promise
-      resolved:andThen(lazy[2], lazy[3])
-    end
-  else -- resolve as value
-    this[1], this.andThen = resolved, sure and promised_y or promised_n
-    for i, lazy, action in inext, this, 1 do -- 2..n
-      action = sure and (lazy[2] or nothing) or (lazy[3] or nothing)
-      pcall(resolver, lazy[1], promised(resolved, action), sure)
-      this[i] = nil
-    end
+-- 绑定self到某个方法
+function bindSelf(fn, self)
+  return function(...)
+    return fn(self, ...)
   end
 end
 
--- for Promise.all/race, ding coroutine again and again
-local function coroutine_push(co, promises)
-  -- push once
-  coroutine.resume(co)
+-- 隔离函数，为了防止回调过多导致爆栈需要隔离回调操作
+function asap(callback)
+  local co = coroutine.wrap(callback)
+  co()
+end
 
-  -- and try push all
-  --	1) resume a dead coroutine is safe always.
-  -- 	2) if promises[i] promised, skip it
-  local resume_y = function(value) coroutine.resume(co, true, value) end
-  local resume_n = function(reason) coroutine.resume(co, false, reason) end
-  for i = 1, #promises do
-    if promises[i][1] == PENDING then
-      promises[i]:andThen(resume_y, resume_n)
-    end
+-- 类
+local Promise = {
+  setStackTraceback = function(value)
+    stackTraceback = value
   end
+}
+
+-- 类方法 （静态方法）
+function Promise.new(resolver)
+  if (type(resolver) ~= 'function') then
+    error('Promise resolver ' .. type(resolver) .. ' is not a function')
+  end
+
+  local newPromise = {
+    PromiseStatus = PENDING,
+    PromiseValue = nil,
+    deferreds = {},
+  }
+  -- promise的主要方法，这么写是为了绑定self
+  newPromise.andThen = bindSelf(andThen, newPromise)
+  newPromise.catch = bindSelf(catch, newPromise)
+
+  -- 执行传入promise的方法
+  resolver(bindSelf(resolve, newPromise), bindSelf(reject, newPromise))
+
+  return newPromise
 end
 
--- promise as meta_table of all instances
-promise.__index = promise
--- reset __len meta-method
---	1) lua 5.2 or LuaJIT 2 with LUAJIT_ENABLE_LUA52COMPAT enabled
---	2) need table-len patch in 5.1x, @see http://lua-users.org/wiki/LuaPowerPatches
--- promise.__len = function() return 0 end
-
--- promise for basetype
-local number_promise = setmetatable({ andThen = promised_y }, promise)
-local true_promise = setmetatable({ andThen = promised_y, true }, promise)
-local false_promise = setmetatable({ andThen = promised_y, false }, promise)
-number_promise.__index = number_promise
-nil_promise.andThen = promised_y
-getmetatable('').__index.andThen = promised_s
-getmetatable('').__index.catch = function(self) return self end
-setmetatable(nil_promise, promise)
-
-------------------------------------------------------------------------------------------
--- instnace method
--- 1) promise:andThen(onFulfilled, onRejected)
--- 2) promise:catch(onRejected)
-------------------------------------------------------------------------------------------
-function promise:andThen(onFulfilled, onRejected)
-  local lazy = { { PENDING }, onFulfilled, onRejected }
-  table.insert(self, lazy)
-  return setmetatable(lazy[1], promise) -- <lazy[1]> is promise2
+function Promise.isPromise(obj)
+  return (type(obj) == 'table') and type(obj.andThen) == 'function'
 end
 
-function promise:catch(onRejected)
-  return self:andThen(nil, onRejected)
-end
-
-------------------------------------------------------------------------------------------
--- class method
--- 1) Promise.resolve(value)
--- 2) Promise.reject(reason)
--- 3) Promise.all()
-------------------------------------------------------------------------------------------
-
--- resolve() rules:
---	1) promise object will direct return
--- 	2) thenable (with/without string) object
--- 		- case 1: direct return, or
---		- case 2: warp as resolved promise object, it's current selected.
--- 	3) warp other(nil/boolean/number/table/...) as resolved promise object
+--- - Promise.resolve方法相当于实例化一个Promise对象，状态变为RESOLVED
 function Promise.resolve(value)
-  local valueType = type(value)
-  if valueType == 'nil' then
-    return nil_promise
-  elseif valueType == 'boolean' then
-    return value and true_promise or false_promise
-  elseif valueType == 'number' then
-    return setmetatable({ (value) }, number_promise)
-  elseif valueType == 'string' then
-    return value
-  elseif (valueType == 'table') and (value.andThen ~= nil) then
-    return value.catch ~= nil and value -- or, we can direct return value
-        or setmetatable({ catch = promise.catch }, { __index = value })
-  else
-    return setmetatable({ andThen = promised_y, value }, promise)
+  if (Promise.isPromise(value)) then return value end
+  return Promise.new(function(resolve, reject)
+    resolve(value)
+  end)
+end
+
+--- - Promise.reject方法相当于实例化一个Promise对象，状态变为REJECTED
+function Promise.reject(value)
+  return Promise.new(function(resolve, reject)
+    reject(value)
+  end)
+end
+
+function Promise.all(args)
+  if (type(args) ~= 'table') then args = {} end
+  return Promise.new(function(resolve, reject)
+    if (#args == 0) then return resolve({}) end
+    local remaining = #args
+    local function getRes(k, value)
+      if (Promise.isPromise(value)) then
+        value.andThen(function(res)
+          getRes(k, res)
+        end, function(err)
+          reject(err)
+        end)
+        return
+      end
+
+      args[k] = value
+      remaining = remaining - 1
+      if (remaining == 0) then
+        resolve(args)
+      end
+    end
+
+    for k, value in ipairs(args) do
+      getRes(k, value)
+    end
+  end)
+end
+
+function Promise.race(args)
+  if (type(args) ~= 'table') then args = {} end
+  return Promise.new(function(resolve, reject)
+    for k, v in ipairs(args) do
+      Promise.resolve(v).andThen(resolve, reject)
+    end
+  end)
+end
+
+-- 对象方法
+function resolve(self, value)
+  local xpcallRes, xpcallErr = tryCatch(function()
+    if (Promise.isPromise(value)) then
+      doResolve(self, value.andThen, resolve, reject)
+      return
+    end
+    self.PromiseStatus = RESOLVED
+    self.PromiseValue = value
+    finale(self)
+  end)
+  if (not xpcallRes) then
+    reject(self, xpcallErr)
   end
 end
 
-function Promise.reject(reason)
-  return setmetatable({ andThen = promised_n, reason }, promise)
+function reject(self, value)
+  self.PromiseStatus = REJECTED
+  self.PromiseValue = value
+  if (stackTraceback) then
+    self.PromiseValue = value .. '\n' .. debug.traceback()
+  end
+  finale(self)
 end
 
-function Promise.all(arr)
-  local this, promises, count = setmetatable({ PENDING }, promise), {}, #arr
-  local co = coroutine.create(function()
-    local i, result, sure, last = 1, {}, true, 0
-    while i <= count do
-      local promise, typ, reason, resolved = promises[i], type(promises[i])
-      if typ == 'table' and promise.andThen and promise[1] == PENDING then
-        sure, reason = coroutine.yield()
-        if not sure then
-          return resolver(this, { index = i, reason = reason }, sure)
-        end
-        -- dont inc <i>, continue and try pick again
-      else
-        -- check reject/resolve of promsied instance
-        --	*) TODO: dont access promise[1] or promised_n
-        sure = (typ == 'string') or (typ == 'table' and promise.andThen ~= promised_n)
-        resolved = (typ == 'string') and promise or promise[1]
-        if not sure then
-          return resolver(this, { index = i, reason = resolved }, sure)
-        end
-        -- pick result from promise, and push once
-        result[i] = resolved
-        if result[i] ~= nil then last = i end
-        i = i + 1
-      end
-    end
-    -- becuse 'result[x]=nil' will reset length to first invalid, so need reset it to last
-    -- 	1) invalid: setmetatable(result, {__len=function() retun count end})
-    -- 	2) obsoleted: table.setn(result, count)
-    resolver(this, sure and { unpack(result, 1, last) } or result, sure)
+function Handler(onResolved, onRejected, resolve, reject)
+  return {
+    -- 当前promise的状态转换事件处理函数
+    onResolved = type(onResolved) == 'function' and onResolved or nil,
+    -- 当前promise的状态转换事件处理函数
+    onRejected = type(onRejected) == 'function' and onRejected or nil,
+    resolve = resolve,
+    reject = reject,
+  }
+end
+
+-- promise的主要方法。由于lua中then是关键字，所以用andThen取代
+function andThen(self, onResolved, onRejected)
+  -- then本身也会返回一个promise，实现promise链
+  return Promise.new(function(resolve, reject)
+    local deferred = Handler(onResolved, onRejected, resolve, reject)
+    handle(self, deferred)
   end)
-
-  -- init promises and push
-  for i, item in ipairs(arr) do promises[i] = Promise.resolve(item) end
-  coroutine_push(co, promises)
-  return this
 end
 
-function Promise.race(arr)
-  local this, result, count = setmetatable({ PENDING }, promise), {}, #arr
-  local co = coroutine.create(function()
-    local i, sure, resolved = 1
-    while i < count do
-      local promise, typ = result[i], type(result[i])
-      if typ == 'table' and promise.andThen and promise[1] == PENDING then
-        sure, resolved = coroutine.yield()
-      else
-        -- check reject/resolve of promsied instance
-        --	*) TODO: dont access promise[1] or promised_n
-        sure = (typ == 'string') or (typ == 'table' and promise.andThen ~= promised_n)
-        resolved = typ == 'string' and promise or promise[1]
-      end
-      -- pick resolved once only
-      break
+function handle(self, deferred)
+  if (self.PromiseStatus == PENDING) then
+    table.insert(self.deferreds, deferred)
+    return
+  end
+  asap(function()
+    local cb
+    if (self.PromiseStatus == RESOLVED) then
+      cb = deferred.onResolved
+    else
+      cb = deferred.onRejected
     end
-    resolver(this, resolved, sure)
-  end)
+    if (type(cb) == 'nil') then
+      if (self.PromiseStatus == RESOLVED) then
+        deferred.resolve(self.PromiseValue)
+      else
+        deferred.reject(self.PromiseValue)
+      end
+      return
+    end
 
-  -- init promises and push
-  for i, item in ipairs(arr) do promises[i] = Promise.resolve(item) end
-  coroutine_push(co, promises)
-  return this
+    local ret
+    local xpcallRes, xpcallErr = tryCatch(function()
+      -- 执行当前promise的状态转换事件处理函数
+      ret = cb(self.PromiseValue)
+    end)
+    if (not xpcallRes) then
+      -- 修改promise链表中下一个promise对象的状态为rejected
+      deferred.reject(xpcallErr)
+      return
+    end
+    -- 修改promise链表中下一个promise对象的状态为resolved
+    deferred.resolve(ret)
+  end)
 end
 
-------------------------------------------------------------------------------------------
--- constructor method
--- 1) Promise.new(func)
--- (*) new() will try execute <func>, but andThen() is lazyed.
-------------------------------------------------------------------------------------------
-function Promise.new(func)
-  local this = setmetatable({ PENDING }, promise)
-  local ok, result = pcall(func,
-    function(value) return resolver(this, value, true) end,
-    function(reason) return resolver(this, reason, false) end)
-  return ok and this or Promise.reject(result) -- .. '.\n' .. debug.traceback())
+-- 对状态转换事件处理函数进行封装后，再传给执行函数
+function doResolve(self, andThenFn, onResolved, onRejected)
+  -- done作为开关以防止fn内同时调用resolve和reject方法
+  local done = false
+  local xpcallRes, xpcallErr = tryCatch(function()
+    andThenFn(function(value)
+      if (done) then return end
+      done = true
+      onResolved(self, value)
+    end, function(value)
+      if (done) then return end
+      done = true
+      onRejected(self, value)
+    end)
+  end)
+  if (not xpcallRes) then
+    if (done) then return end
+    done = true
+    onRejected(self, xpcallErr)
+  end
+end
+
+-- 移动到链表的下一个promise
+function finale(self)
+  for k, v in ipairs(self.deferreds) do
+    handle(self, v);
+  end
+  self.deferreds = {};
+end
+
+-- promise的主要方法
+function catch(self, onRejected)
+  -- then本身也会返回一个promise，实现promise链
+  self.andThen(nil, onRejected)
 end
 
 return Promise

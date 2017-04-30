@@ -1,3 +1,16 @@
+local isArray = table.isArray or function(tab)
+  if (type(tab) ~= "table") then
+    return false
+  end
+  local length = #tab
+  for k, v in pairs(tab) do
+    if ((type(k) ~= "number") or (k > length)) then
+      return false
+    end
+  end
+  return true
+end
+
 local __console = console or {}
 
 local function runTable(tab, space)
@@ -19,10 +32,9 @@ local function runTable(tab, space)
   if (type(space) ~= "string") then
     space = ""
   end
-  local isArray = table.isArray(tab)
   local newTab = {}
   local childSpace = space .. "  "
-  if (isArray) then
+  if (isArray(tab)) then
     for k, v in ipairs(tab) do
       table.insert(newTab, runTable(v, childSpace))
     end
