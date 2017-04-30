@@ -69,11 +69,9 @@ function new(gen, ...)
     end
 
     function onRejected(err)
-      console.log(err)
       local done, ret, coStatus
       local xpcallRes, xpcallErr = tryCatch(function()
         coStatus, ret = coroutine.resume(gen, error(err))
-        console.log(ret)
       end)
       if (not xpcallRes) then
         return reject(xpcallErr)

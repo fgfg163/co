@@ -9,7 +9,7 @@ co(coroutine.create(function()
   local v2 = coroutine.yield(Promise.all({
     Promise.resolve('promise01'),
     Promise.resolve('promise02'),
-    Promise.resolve('promise03'),
+    Promise.reject('promise03'),
   }))
   console.log(v2)
 end)).catch(function(err)

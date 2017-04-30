@@ -33,5 +33,7 @@ some value
 ```
 
 ChangeLog
+-- 2017.05.01 
+>  promise bug fix
 
 -- 2017.04.29 release v1.0

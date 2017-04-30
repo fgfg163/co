@@ -135,7 +135,7 @@ end
 function reject(self, value)
   self.PromiseStatus = REJECTED
   self.PromiseValue = value
-  if (stackTraceback) then
+  if (stackTraceback and (not string.find(value, '\n'))) then
     self.PromiseValue = value .. '\n' .. debug.traceback()
   end
   finale(self)
