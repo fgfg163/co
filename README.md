@@ -6,6 +6,28 @@ lua的co库
 
 使用协程(coroutine)实现的co库，用于处理Promise异步问题
 
+这个Co库打包为2个版本
+Co.lua不包含Promise，你可以使用自己的Promise实现。
+需要在使用前将Promise加载到全局变量里，或者将Promise.lua文件放在Co.lua相同目录下
+```lua
+-- 用全局变量方式引入Promise
+Promise = require 'Your Promise lib'
+local co = require 'Co'
+
+...
+
+```
+
+Co_with_promise.lua包含了一个Promise实现，使用时直接引用即可
+```lua
+local co = require 'Co_with_promise'
+local Promise = co.Promise
+
+...
+
+```
+
+
 ```lua
 require 'console'
 local co = require 'Co'
@@ -33,6 +55,9 @@ some value
 ```
 
 ChangeLog
+-- 2017.05.03 
+>  add Co_with_promise for some user.
+
 -- 2017.05.01 
 >  promise bug fix
 

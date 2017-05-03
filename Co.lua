@@ -209,7 +209,8 @@ end
 
 
 return setmetatable({
-  new = new;
+  new = new,
+  Promise = Promise,
 }, {
   __call = function(_, ...)
     return new(...)
