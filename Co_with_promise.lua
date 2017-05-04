@@ -256,6 +256,7 @@ local Promise = Promise or (function()
   return Promise
 end)()
 
+
 local unpack = unpack or table.unpack
 local isArray = table.isArray or function(tab)
   if (type(tab) ~= "table") then
@@ -279,14 +280,15 @@ end
 
 ----------------------------------------------------------------------
 function new(gen, ...)
-  local args = { ... }
-
   return Promise.new(function(resolve, reject)
-    if (type(gen) == 'function') then gen = gen() end
+    if (type(gen) == 'function') then gen = coroutine.create(gen) end
     if (type(gen) ~= 'thread') then return resolve(gen) end
 
-    function onResolved(res)
-      local done, ret, coStatus
+    local onResolved, onRejected, next
+
+    onResolved = function(res)
+      local done, ret
+      local coStatus = true
       local xpcallRes, xpcallErr = tryCatch(function()
         coStatus, ret = coroutine.resume(gen, res)
       end)
@@ -296,12 +298,13 @@ function new(gen, ...)
       if (not coStatus) then
         return reject(ret)
       end
-      done = coroutine.status(gen) == 'dead'
+      done = (coroutine.status(gen) == 'dead')
       next(done, ret)
     end
 
-    function onRejected(err)
-      local done, ret, coStatus
+    onRejected = function(err)
+      local done, ret
+      local coStatus = true
       local xpcallRes, xpcallErr = tryCatch(function()
         coStatus, ret = coroutine.resume(gen, error(err))
       end)
@@ -311,19 +314,29 @@ function new(gen, ...)
       if (not coStatus) then
         return reject(xpcallErr)
       end
-      done = coroutine.status(gen) == 'dead'
+      done = (coroutine.status(gen) == 'dead')
       next(done, ret)
     end
 
-    function next(done, ret)
-      if (done) then return resolve(ret) end
+    next = function(done, ret)
+      if (done) then
+        resolve(ret)
+        return
+      end
       local value = toPromise(ret)
-      if (value and (isPromise(value))) then return value.andThen(onResolved, onRejected) end
-      return onResolved(value)
-      --      return onRejected(error('You may only yield a function, promise, generator, array, or object, '
+      if (value and (isPromise(value))) then
+        value.andThen(function(...)
+          return onResolved(...)
+        end, function(...)
+          return onRejected(...)
+        end)
+        return
+      end
+      onResolved(value)
+      --       onRejected(error('You may only yield a function, promise, generator, array, or object, '
       --          .. 'but the following object was passed: "' .. type(ret) .. '"'))
+      return
     end
-
 
     onResolved();
   end)
@@ -357,7 +370,7 @@ end
 -- @return {Boolean}
 -- @api private
 function isPromise(obj)
-  if ((type(obj) == 'table') and type(obj.andThen) == 'function') then
+  if ((type(obj) == 'table') and (type(obj.andThen) == 'function')) then
     return true
   end
   return false
