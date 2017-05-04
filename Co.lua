@@ -87,22 +87,15 @@ function new(gen, ...)
 
     next = function(done, ret)
       if (done) then
-        resolve(ret)
-        return
+        return resolve(ret)
       end
       local value = toPromise(ret)
       if (value and (isPromise(value))) then
-        value.andThen(function(...)
-          return onResolved(...)
-        end, function(...)
-          return onRejected(...)
-        end)
-        return
+        return value.andThen(onResolved, onRejected)
       end
-      onResolved(value)
+      return onResolved(value)
       --       onRejected(error('You may only yield a function, promise, generator, array, or object, '
       --          .. 'but the following object was passed: "' .. type(ret) .. '"'))
-      return
     end
 
     onResolved();
