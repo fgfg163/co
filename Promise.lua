@@ -133,6 +133,7 @@ function resolve(self, value)
 end
 
 function reject(self, value)
+  value = value or ''
   self.PromiseStatus = REJECTED
   self.PromiseValue = value
   if (stackTraceback and (not string.find(value, '\n'))) then
@@ -160,6 +161,7 @@ function andThen(self, onResolved, onRejected)
     handle(self, deferred)
   end)
 end
+
 
 function handle(self, deferred)
   if (self.PromiseStatus == PENDING) then
